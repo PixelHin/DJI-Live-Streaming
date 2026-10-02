@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Livestream viewer</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #000;
+      --panel: #111;
+      --line: #f5c400;
+      --text: #fff;
+      --muted: #fff;
+      --accent: #f5c400;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+    }
+    h1 { font-size: 22px; margin: 0 0 8px; color: #fff; }
+    p { margin: 0 0 12px; color: #fff; }
+    label { display: block; font-size: 13px; color: #fff; margin-bottom: 6px; }
+    input, textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #000;
+      color: var(--text);
+    }
+    textarea { font: 12px/1.4 Consolas, monospace; resize: vertical; }
+    .row { display: grid; gap: 12px; margin: 16px 0; }
+    @media (min-width: 720px) {
+      .row.two { grid-template-columns: 1fr 1fr; }
+    }
+    .group {
+      margin-top: 12px;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+    .group[hidden], [hidden] { display: none; }
+    .protocols { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 16px; }
+    button {
+      border: 1px solid var(--line);
+      background: #000;
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 14px;
+      cursor: pointer;
+    }
+    button[aria-pressed="true"], button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #000;
+    }
+    .stage {
+      position: relative;
+      background: #000;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      aspect-ratio: 16 / 9;
+    }
+    video, #agora-player { width: 100%; height: 100%; background: #000; }
+    #agora-player { position: absolute; inset: 0; }
+    #agora-player video { object-fit: contain; }
+    .notice[hidden] { display: none; }
+    .notice {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      text-align: center;
+      color: #fff;
+      background: rgba(0, 0, 0, 0.72);
+    }
+    .card {
+      margin-top: 16px;
+      padding: 14px 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    code { color: #fff; word-break: break-all; }
+    .actions { display: flex; gap: 8px; margin-top: 12px; }
+    .log-panel {
+      position: fixed;
+      inset: 8vh 8vw;
+      z-index: 5;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px;
+      background: #000;
+      border: 2px solid var(--line);
+      border-radius: 12px;
+    }
+    .log-panel[hidden] { display: none; }
+    #log-full { flex: 1; min-height: 240px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Livestream viewer</h1>
+    <p>API Call starts the FlightHub livestream. Stream Forwarding plays an RTMP or RTSP address.</p>
+
+    <div class="protocols" role="group" aria-label="Mode">
+      <button type="button" id="btn-api" aria-pressed="false">API Call</button>
+      <button type="button" id="btn-forward" aria-pressed="false">Stream Forwarding</button>
+    </div>
+
+    <section class="group" id="api-group" hidden>
+      <div class="row two">
+        <div>
+          <label for="sn">Device SN</label>
+          <input id="sn" placeholder="Dock or aircraft serial number" autocomplete="off">
+        </div>
+        <div>
+          <label for="camera">Camera index</label>
+          <input id="camera" value="165-0-7" autocomplete="off">
+        </div>
+        <div>
+          <label for="project">Project UUID</label>
+          <input id="project" placeholder="X-Project-Uuid" autocomplete="off">
+        </div>
+        <div>
+          <label for="token">User token</label>
+          <input id="token" type="password" placeholder="X-User-Token" autocomplete="off">
+        </div>
+      </div>
+    </section>
+
+    <section class="group" id="forward-group" hidden>
+      <div class="protocols" role="group" aria-label="Forwarding protocol">
+        <button type="button" id="btn-rtmp" aria-pressed="false">RTMP</button>
+        <button type="button" id="btn-rtsp" aria-pressed="false">RTSP</button>
+        <button type="button" id="btn-gb" aria-pressed="false">GB28181</button>
+      </div>
+      <div id="rtmp-fields" hidden>
+        <div class="row two">
+          <div>
+            <label for="rtmp-url">RTMP link</label>
+            <input id="rtmp-url" placeholder="rtmp://127.0.0.1:1935/live/dock" autocomplete="off">
+          </div>
+          <div>
+            <label for="rtmp-sn">Device SN</label>
+            <input id="rtmp-sn" placeholder="Dock or aircraft serial number" autocomplete="off">
+          </div>
+        </div>
+      </div>
+      <div id="rtsp-fields" hidden>
+        <label for="rtsp-url">RTSP link</label>
+        <input id="rtsp-url" placeholder="rtsp://127.0.0.1:554/live/dock" autocomplete="off">
+      </div>
+      <div id="gb-fields" hidden>
+        <label for="gb-id">GB28181 stream id</label>
+        <input id="gb-id" placeholder="Stream id sent with the video" autocomplete="off">
+        <p id="gb-note">ZLMediaKit opens a UDP port for the GB28181 video and plays it here. FlightHub still needs a SIP server to invite the dock to that port.</p>
+      </div>
+    </section>
+
+    <div class="stage">
+      <video id="video" autoplay playsinline controls></video>
+      <div id="agora-player" hidden></div>
+      <div class="notice" id="notice">Choose API Call or Stream Forwarding.</div>
+    </div>
+
+    <div class="actions">
+      <button type="button" class="primary" id="play">Play</button>
+      <button type="button" id="stop">Stop</button>
+    </div>
+
+    <div class="card">
+      <div>Detected from the link: <code id="detected-label">Waiting</code></div>
+      <div id="playback-note"></div>
+      <div>Playback address: <code id="play-url">Waiting</code></div>
+    </div>
+
+    <div class="card">
+      <label for="log-box">Log</label>
+      <textarea id="log-box" readonly rows="4"></textarea>
+      <div class="actions">
+        <button type="button" id="view-log">View Log</button>
+      </div>
+    </div>
+  </main>
+
+  <div class="log-panel" id="log-panel" hidden>
+    <label for="log-full">Log</label>
+    <textarea id="log-full" readonly></textarea>
+    <div class="actions">
+      <button type="button" id="close-log">Close</button>
+    </div>
+  </div>
+
+  <script>
+    const agoraMessage = "This link is in Agora format. Playing it with Agora.";
+    const volcMessage = "This link is Volcengine. Playing it with the Volcengine player.";
+    const notice = document.querySelector("#notice");
+    const video = document.querySelector("#video");
+    const agoraPlayer = document.querySelector("#agora-player");
+    const playUrl = document.querySelector("#play-url");
+    const detectedLabel = document.querySelector("#detected-label");
+    const playbackNote = document.querySelector("#playback-note");
+    const logBox = document.querySelector("#log-box");
+    const logFull = document.querySelector("#log-full");
+    const logPanel = document.querySelector("#log-panel");
+    let mode = "";
+    let forwardProtocol = "";
+    let pc = null;
+    let agoraClient = null;
+    let volcEngine = null;
+    let serverLines = [];
+    let localLines = [];
+    let serverOk = false;
+
+    function addLog(message) {
+      const line = new Date().toTimeString().slice(0, 8) + " " + message;
+      localLines.push(line);
+      if (localLines.length > 500) localLines.shift();
+      renderLogs();
+      fetch("/api/logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: message })
+      }).catch(() => {});
+    }
+
+    function renderLogs() {
+      const lines = serverOk ? serverLines : localLines;
+      logBox.value = lines.slice(-12).join("\n");
+      logFull.value = lines.join("\n");
+      logBox.scrollTop = logBox.scrollHeight;
+      logFull.scrollTop = logFull.scrollHeight;
+    }
+
+    async function refreshLogs() {
+      try {
+        const response = await fetch("/api/logs");
+        if (!response.ok) {
+          serverOk = false;
+          renderLogs();
+          return;
+        }
+        const payload = await response.json();
+        serverLines = payload.lines || [];
+        serverOk = true;
+        renderLogs();
+      } catch (error) {
+        serverOk = false;
+        renderLogs();
+      }
+    }
+
+    function showNotice(text) {
+      notice.hidden = !text;
+      notice.textContent = text || "";
+    }
+
+    function streamProtocol(url, urlType) {
+      const hinted = (urlType || "").toLowerCase();
+      const text = String(url || "");
+      if (hinted === "volc" || hinted === "volcengine" || hinted === "volcano") return "volc";
+      if (text.includes("room_id=") || text.includes("roomId=")) return "volc";
+      if (hinted === "agora" || (text.includes("channel=") && text.includes("token="))) return "agora";
+      let parsed;
+      try {
+        parsed = new URL(text);
+      } catch (error) {
+        return "unknown";
+      }
+      const scheme = parsed.protocol.replace(":", "").toLowerCase();
+      const path = parsed.pathname.toLowerCase();
+      if (scheme === "rtmp" || scheme === "rtmps") return "rtmp";
+      if (scheme === "rtsp" || scheme === "rtsps") return "rtsp";
+      if (scheme === "whep" || scheme === "wheps" || scheme === "whip" || scheme === "webrtc") return "webrtc";
+      if (path.includes("/whep") || path.includes("/whip") || path.startsWith("/rtc/")) return "webrtc";
+      if (hinted === "rtmp" || hinted === "rtsp" || hinted === "webrtc") return hinted;
+      if (hinted === "srs") return "webrtc";
+      return "unknown";
+    }
+
+    function agoraValue(url, key) {
+      const text = String(url || "");
+      const query = text.includes("?") ? text.slice(text.indexOf("?") + 1) : text;
+      for (const part of query.split("&")) {
+        const eq = part.indexOf("=");
+        if (eq === -1 || decodeURIComponent(part.slice(0, eq)) !== key) continue;
+        const raw = part.slice(eq + 1);
+        if (!raw.includes("%")) return raw;
+        try {
+          return decodeURIComponent(raw);
+        } catch (error) {
+          return raw;
+        }
+      }
+      return "";
+    }
+
+    function parseAgora(url) {
+      const token = agoraValue(url, "token");
+      let appId = agoraValue(url, "app_id") || agoraValue(url, "appid") || agoraValue(url, "appId");
+      if (!appId && token.startsWith("006") && token.length >= 35) appId = token.slice(3, 35);
+      const uidText = agoraValue(url, "uid");
+      return {
+        appId: appId,
+        channel: agoraValue(url, "channel"),
+        token: token,
+        uid: uidText === "" ? null : (/^\d+$/.test(uidText) ? Number(uidText) : uidText)
+      };
+    }
+
+    function parseVolc(source) {
+      let value = source;
+      if (typeof value === "string" && value.trim().startsWith("{")) {
+        try {
+          value = JSON.parse(value);
+        } catch (error) {
+          value = source;
+        }
+      }
+      const read = (keys) => {
+        if (value && typeof value === "object") {
+          for (const key of keys) {
+            if (value[key]) return String(value[key]);
+          }
+          return "";
+        }
+        for (const key of keys) {
+          const found = agoraValue(value, key);
+          if (found) return found;
+        }
+        return "";
+      };
+      return {
+        appId: read(["app_id", "appId", "appid"]),
+        roomId: read(["room_id", "roomId", "roomid", "channel"]),
+        userId: read(["user_id", "userId", "uid"]),
+        token: read(["token"])
+      };
+    }
+
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = src;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error("Could not load the Volcengine player."));
+        document.head.appendChild(script);
+      });
+    }
+
+    function loadVolc() {
+      if (window.VERTC) return Promise.resolve();
+      const sources = [
+        "https://cdn.jsdelivr.net/npm/@volcengine/rtc@4.69.2/index.min.js",
+        "https://unpkg.com/@volcengine/rtc@4.69.2/index.min.js"
+      ];
+      return sources.reduce((chain, src) => chain.catch(() => loadScript(src)), Promise.reject());
+    }
+
+    function volcHasVideo(mediaType) {
+      const videoBit = window.VERTC && VERTC.MediaType ? VERTC.MediaType.VIDEO : 2;
+      if (typeof mediaType === "number") return (mediaType & videoBit) === videoBit;
+      return String(mediaType || "").toLowerCase().includes("video");
+    }
+
+    function loadAgora() {
+      if (window.AgoraRTC) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://download.agora.io/sdk/release/AgoraRTC_N-4.22.0.js";
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error("Could not load the Agora player."));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function stopPlayback() {
+      const client = agoraClient;
+      agoraClient = null;
+      if (client) {
+        try {
+          await client.leave();
+        } catch (error) {
+          /* The channel may already be closed. */
+        }
+      }
+      const engine = volcEngine;
+      volcEngine = null;
+      if (engine) {
+        try {
+          await engine.leaveRoom();
+        } catch (error) {
+          /* The room may already be closed. */
+        }
+        try {
+          if (window.VERTC && VERTC.destroyEngine) VERTC.destroyEngine(engine);
+        } catch (error) {
+          /* The engine may already be destroyed. */
+        }
+      }
+      agoraPlayer.innerHTML = "";
+      agoraPlayer.hidden = true;
+      video.hidden = false;
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+      video.srcObject = null;
+    }
+
+    function setPressed(id, pressed) {
+      document.querySelector(id).setAttribute("aria-pressed", pressed ? "true" : "false");
+    }
+
+    function setMode(next) {
+      mode = mode === next ? "" : next;
+      setPressed("#btn-api", mode === "api");
+      setPressed("#btn-forward", mode === "forward");
+      document.querySelector("#api-group").hidden = mode !== "api";
+      document.querySelector("#forward-group").hidden = mode !== "forward";
+      addLog(mode === "api" ? "API Call opened" : mode === "forward" ? "Stream Forwarding opened" : "Mode closed");
+      showNotice(mode ? "Press Play." : "Choose API Call or Stream Forwarding.");
+    }
+
+    function setForward(next) {
+      forwardProtocol = forwardProtocol === next ? "" : next;
+      setPressed("#btn-rtmp", forwardProtocol === "rtmp");
+      setPressed("#btn-rtsp", forwardProtocol === "rtsp");
+      setPressed("#btn-gb", forwardProtocol === "gb28181");
+      document.querySelector("#rtmp-fields").hidden = forwardProtocol !== "rtmp";
+      document.querySelector("#rtsp-fields").hidden = forwardProtocol !== "rtsp";
+      document.querySelector("#gb-fields").hidden = forwardProtocol !== "gb28181";
+      addLog(forwardProtocol ? "Forwarding protocol " + forwardProtocol : "Forwarding protocol cleared");
+    }
+
+    async function playAgora(url) {
+      await stopPlayback();
+      playbackNote.textContent = agoraMessage;
+      showNotice(agoraMessage);
+      addLog("Playing Agora stream");
+      const fields = parseAgora(url);
+      if (!fields.channel || !fields.token || !fields.appId) {
+        throw new Error("The Agora link is missing the channel, token, or app id.");
+      }
+      await loadAgora();
+      const client = AgoraRTC.createClient({ mode: "live", codec: "h264" });
+      agoraClient = client;
+      client.on("user-published", async (user, mediaType) => {
+        if (agoraClient !== client) return;
+        await client.subscribe(user, mediaType);
+        if (mediaType === "video" && user.videoTrack) {
+          video.hidden = true;
+          agoraPlayer.hidden = false;
+          user.videoTrack.play(agoraPlayer);
+          showNotice("");
+          addLog("Agora video track is playing");
+        }
+        if (mediaType === "audio" && user.audioTrack) user.audioTrack.play();
+      });
+      await client.setClientRole("audience");
+      await client.join(fields.appId, fields.channel, fields.token, fields.uid);
+    }
+
+    async function playVolc(data) {
+      await stopPlayback();
+      playbackNote.textContent = volcMessage;
+      showNotice(volcMessage);
+      addLog("Playing Volcengine stream");
+      const fromUrl = parseVolc(data.url || "");
+      const fromData = parseVolc(data);
+      const fields = {
+        appId: fromUrl.appId || fromData.appId,
+        roomId: fromUrl.roomId || fromData.roomId,
+        userId: fromUrl.userId || fromData.userId,
+        token: fromUrl.token || fromData.token
+      };
+      if (!fields.appId || !fields.roomId || !fields.userId || !fields.token) {
+        throw new Error("The Volcengine link is missing the app id, room id, user id, or token.");
+      }
+      await loadVolc();
+      const engine = VERTC.createEngine(fields.appId);
+      volcEngine = engine;
+      try {
+        if (typeof engine.setUserVisibility === "function") engine.setUserVisibility(false);
+      } catch (error) {
+        /* A viewer can still join when this call is unavailable. */
+      }
+      engine.on(VERTC.events.onUserPublishStream, (event) => {
+        if (volcEngine !== engine || !volcHasVideo(event.mediaType)) return;
+        video.hidden = true;
+        agoraPlayer.hidden = false;
+        engine.setRemoteVideoPlayer(VERTC.StreamIndex.STREAM_INDEX_MAIN, {
+          userId: event.userId,
+          renderDom: agoraPlayer
+        });
+        showNotice("");
+        addLog("Volcengine video track is playing");
+      });
+      await engine.joinRoom(fields.token, fields.roomId, { userId: fields.userId }, {
+        isAutoPublish: false,
+        isAutoSubscribeAudio: true,
+        isAutoSubscribeVideo: true
+      });
+    }
+
+    async function playWhep(url, statusText) {
+      await stopPlayback();
+      showNotice(statusText);
+      addLog(statusText + " " + url);
+      const next = new RTCPeerConnection();
+      pc = next;
+      next.addTransceiver("video", { direction: "recvonly" });
+      next.addTransceiver("audio", { direction: "recvonly" });
+      next.ontrack = (event) => {
+        const stream = event.streams[0];
+        if (video.srcObject !== stream) video.srcObject = stream;
+        showNotice("");
+        addLog("Video track is playing");
+      };
+      const offer = await next.createOffer();
+      await next.setLocalDescription(offer);
+      await new Promise((resolve) => {
+        const finish = () => resolve();
+        if (next.iceGatheringState === "complete") {
+          finish();
+          return;
+        }
+        next.addEventListener("icegatheringstatechange", () => {
+          if (next.iceGatheringState === "complete") finish();
+        });
+        setTimeout(finish, 1500);
+      });
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: next.localDescription.sdp
+      });
+      if (!response.ok) {
+        throw new Error("Playback failed (" + response.status + "). The stream is not publishing at that address.");
+      }
+      const answer = await response.text();
+      if (pc !== next) return;
+      await next.setRemoteDescription({ type: "answer", sdp: answer });
+    }
+
+    async function startLive() {
+      const response = await fetch("/api/live/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sn: document.querySelector("#sn").value.trim(),
+          camera_index: document.querySelector("#camera").value.trim(),
+          project_uuid: document.querySelector("#project").value.trim(),
+          token: document.querySelector("#token").value.trim(),
+          video_expire: 7200,
+          quality_type: "adaptive"
+        })
+      });
+      const text = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch (error) {
+        throw new Error("The livestream request returned a web page instead of JSON. Open this page from python server.py, at http://<this-pc>:8765.");
+      }
+      if (!response.ok || payload.code) {
+        throw new Error(payload.message || "FlightHub rejected live-stream/start.");
+      }
+      if (!payload.data || !payload.data.url) {
+        throw new Error("FlightHub did not return a playback URL.");
+      }
+      return payload.data;
+    }
+
+    async function prepareStream(protocol, url, sn) {
+      const response = await fetch("/api/zlm/prepare", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ protocol: protocol, url: url, sn: sn })
+      });
+      const text = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch (error) {
+        throw new Error("Open this page from python server.py so it can reach ZLMediaKit.");
+      }
+      if (!response.ok || payload.code) {
+        throw new Error(payload.message || "ZLMediaKit did not accept the stream.");
+      }
+      return payload;
+    }
+
+    async function playForward() {
+      if (forwardProtocol === "gb28181") {
+        const streamId = document.querySelector("#gb-id").value.trim();
+        if (!streamId) throw new Error("Enter the GB28181 stream id.");
+        const prepared = await prepareStream("gb28181", "", streamId);
+        detectedLabel.textContent = "GB28181";
+        playUrl.textContent = prepared.whep;
+        playbackNote.textContent = prepared.rtp_port ? "UDP port " + prepared.rtp_port : "";
+        try {
+          await playWhep(prepared.whep, "Playing GB28181 through ZLMediaKit.");
+        } catch (error) {
+          const port = prepared.rtp_port ? " ZLMediaKit is listening on UDP port " + prepared.rtp_port + "." : "";
+          throw new Error((error.message || "Playback failed.") + port);
+        }
+        return;
+      }
+      if (forwardProtocol === "rtmp") {
+        const link = document.querySelector("#rtmp-url").value.trim();
+        const sn = document.querySelector("#rtmp-sn").value.trim();
+        if (!link) throw new Error("Enter the RTMP link.");
+        const prepared = await prepareStream("rtmp", link, sn);
+        detectedLabel.textContent = "RTMP";
+        playUrl.textContent = prepared.whep;
+        playbackNote.textContent = sn ? "RTMP device SN " + sn : "";
+        await playWhep(prepared.whep, "Playing the RTMP stream through ZLMediaKit.");
+        return;
+      }
+      if (forwardProtocol === "rtsp") {
+        const link = document.querySelector("#rtsp-url").value.trim();
+        if (!link) throw new Error("Enter the RTSP link.");
+        const prepared = await prepareStream("rtsp", link, "");
+        detectedLabel.textContent = "RTSP";
+        playUrl.textContent = prepared.whep;
+        playbackNote.textContent = "";
+        await playWhep(prepared.whep, "Playing the RTSP stream through ZLMediaKit.");
+        return;
+      }
+      throw new Error("Choose RTMP, RTSP, or GB28181.");
+    }
+
+    document.querySelector("#btn-api").addEventListener("click", () => setMode("api"));
+    document.querySelector("#btn-forward").addEventListener("click", () => setMode("forward"));
+    document.querySelector("#btn-rtmp").addEventListener("click", () => setForward("rtmp"));
+    document.querySelector("#btn-rtsp").addEventListener("click", () => setForward("rtsp"));
+    document.querySelector("#btn-gb").addEventListener("click", () => setForward("gb28181"));
+
+    document.querySelector("#play").addEventListener("click", async () => {
+      playbackNote.textContent = "";
+      try {
+        if (mode === "forward") {
+          await playForward();
+          return;
+        }
+        if (mode !== "api") {
+          showNotice("Choose API Call or Stream Forwarding.");
+          return;
+        }
+        showNotice("Calling FlightHub live-stream/start…");
+        playUrl.textContent = "Waiting";
+        detectedLabel.textContent = "Waiting";
+        addLog("Calling FlightHub live-stream/start");
+        const data = await startLive();
+        const detected = streamProtocol(data.url, data.url_type);
+        playUrl.textContent = data.url;
+        detectedLabel.textContent = detected === "agora" ? "Agora" : detected === "volc" ? "Volcengine" : detected;
+        addLog("FlightHub url_type=" + (data.url_type || "-") + " detected=" + detected);
+        if (detected === "agora") {
+          await playAgora(data.url);
+          return;
+        }
+        if (detected === "volc") {
+          await playVolc(data);
+          return;
+        }
+        if (detected !== "webrtc") {
+          await stopPlayback();
+          showNotice("This link is " + detected + ". This page plays Agora, Volcengine, and WebRTC from API Call, and RTMP or RTSP from Stream Forwarding.");
+          return;
+        }
+        await playWhep(data.url, "Playing the WebRTC stream.");
+      } catch (error) {
+        await stopPlayback();
+        const message = error.message === "Failed to fetch"
+          ? (mode === "forward"
+            ? "Could not reach ZLMediaKit on port 8080 for that link."
+            : "Could not reach the local server. run start_server.bat and open this page from it.")
+          : (error.message || "Could not start the livestream.");
+        showNotice(message);
+        addLog(message);
+      }
+    });
+
+    document.querySelector("#stop").addEventListener("click", async () => {
+      await stopPlayback();
+      playbackNote.textContent = "";
+      showNotice("Stopped.");
+      addLog("Playback stopped");
+    });
+
+    document.querySelector("#view-log").addEventListener("click", async () => {
+      await refreshLogs();
+      logPanel.hidden = false;
+      addLog("Log panel opened");
+    });
+    document.querySelector("#close-log").addEventListener("click", () => {
+      logPanel.hidden = true;
+      addLog("Log panel closed");
+    });
+
+    addLog("Viewer ready");
+  </script>
+</body>
+</html>
