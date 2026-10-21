@@ -27,8 +27,27 @@ go.work.sum
 # env file
 .env
 
+# Local SIP server database and Redis data
+wvp-GB28181-pro/wvp-data/
+tools/redis/*.rdb
+
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# ZLMediaKit compile output
+ZLMediaKit/build-mingw/
+ZLMediaKit/CMakeFiles/
+ZLMediaKit/CMakeCache.txt
+ZLMediaKit/deps/libsrtp-build/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+
+# The built media server is part of this project
+!ZLMediaKit/release/windows/Release/MediaServer.exe
+!ZLMediaKit/release/windows/Release/*.dll
+
 # Local TLS private key. Do not publish.
 ZLMediaKit/release/windows/Release/default.pem
+ZLMediaKit/default.pem

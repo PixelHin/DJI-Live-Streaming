@@ -1,15 +1,17 @@
 # DJI Live Streaming
 
-Windows and Python 3 are required. Python must be available as `python`.
+Windows, Python 3, and Java are required. Python must be available as `python`, and Java as `java`.
 
 ## Start the server
 
 1. Open the project folder.
 2. Double-click `start_server.bat`.
-3. Leave that window open. It runs the media server and the website together.
+3. Leave that window open. It starts Redis, the media server, the SIP server, and the website.
 4. Open a browser at `http://127.0.0.1:8765`.
 
 Type `stop` in the server window to exit.
+
+The GB28181 page is `http://127.0.0.1:8765/gb28181.html`. In FlightHub 2 and on that page, use SIP server port `8116`, SIP server domain `4101050000`, SIP server ID `41010500002000000001`, and password `12345678`. The SIP server IP is this PC’s address that the dock can reach. Forward UDP and TCP `8116` to this PC.
 
 ## API Call
 

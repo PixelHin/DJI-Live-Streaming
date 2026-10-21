@@ -109,6 +109,22 @@
     }
     .log-panel[hidden] { display: none; }
     #log-full { flex: 1; min-height: 240px; }
+    .login-panel {
+      position: fixed;
+      left: 50%;
+      top: 18vh;
+      transform: translateX(-50%);
+      z-index: 6;
+      width: min(420px, calc(100% - 32px));
+      padding: 16px;
+      background: #000;
+      border: 2px solid var(--line);
+      border-radius: 12px;
+    }
+    .login-panel[hidden] { display: none; }
+    .login-panel h2 { margin: 0 0 8px; font-size: 18px; }
+    .login-panel .error { margin: 8px 0 0; color: var(--line); }
+    .login-panel .error[hidden] { display: none; }
   </style>
 </head>
 <body>
@@ -196,6 +212,20 @@
       </div>
     </div>
   </main>
+
+  <div class="login-panel" id="rtsp-login" hidden>
+    <h2>RTSP login</h2>
+    <p>This address has no username or password. Sign in, and the page will connect to the RTSP server again.</p>
+    <label for="rtsp-user">Username</label>
+    <input id="rtsp-user" autocomplete="off">
+    <label for="rtsp-pass">Password</label>
+    <input id="rtsp-pass" type="password" autocomplete="off">
+    <p class="error" id="rtsp-login-error" hidden></p>
+    <div class="actions">
+      <button type="button" class="primary" id="rtsp-login-ok">Connect</button>
+      <button type="button" id="rtsp-login-cancel">Cancel</button>
+    </div>
+  </div>
 
   <div class="log-panel" id="log-panel" hidden>
     <label for="log-full">Log</label>
@@ -586,6 +616,69 @@
       return payload.data;
     }
 
+    function rtspNeedsLogin(url) {
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch (error) {
+        return false;
+      }
+      const scheme = parsed.protocol.replace(":", "").toLowerCase();
+      if (scheme !== "rtsp" && scheme !== "rtsps") return false;
+      if (parsed.username && parsed.password) return false;
+      const host = parsed.hostname.toLowerCase();
+      const pageHost = location.hostname.toLowerCase();
+      if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === pageHost) return false;
+      return true;
+    }
+
+    function rtspWithLogin(url, username, password) {
+      const parsed = new URL(url);
+      const encodeUserInfo = (value) => encodeURIComponent(value).replace(/[!'()*]/g, (char) => {
+        return "%" + char.charCodeAt(0).toString(16).toUpperCase();
+      });
+      const user = encodeUserInfo(username);
+      const pass = encodeUserInfo(password);
+      return parsed.protocol + "//" + user + ":" + pass + "@" + parsed.host + parsed.pathname + parsed.search;
+    }
+
+    function askRtspLogin() {
+      const panel = document.querySelector("#rtsp-login");
+      const user = document.querySelector("#rtsp-user");
+      const pass = document.querySelector("#rtsp-pass");
+      const error = document.querySelector("#rtsp-login-error");
+      user.value = "";
+      pass.value = "";
+      error.hidden = true;
+      error.textContent = "";
+      panel.hidden = false;
+      user.focus();
+      return new Promise((resolve) => {
+        const finish = (value) => {
+          panel.hidden = true;
+          pass.value = "";
+          ok.removeEventListener("click", onOk);
+          cancel.removeEventListener("click", onCancel);
+          resolve(value);
+        };
+        const onOk = () => {
+          const username = user.value.trim();
+          const password = pass.value;
+          if (!username || !password) {
+            error.textContent = "Enter the username and password.";
+            error.hidden = false;
+            return;
+          }
+          finish({ username: username, password: password });
+        };
+        const onCancel = () => finish(null);
+        const ok = document.querySelector("#rtsp-login-ok");
+        const cancel = document.querySelector("#rtsp-login-cancel");
+        ok.addEventListener("click", onOk);
+        cancel.addEventListener("click", onCancel);
+      });
+    }
+
     async function prepareStream(protocol, url, sn) {
       const response = await fetch("/api/zlm/prepare", {
         method: "POST",
@@ -633,8 +726,15 @@
         return;
       }
       if (forwardProtocol === "rtsp") {
-        const link = document.querySelector("#rtsp-url").value.trim();
+        let link = document.querySelector("#rtsp-url").value.trim();
         if (!link) throw new Error("Enter the RTSP link.");
+        if (rtspNeedsLogin(link)) {
+          showNotice("This RTSP address needs a username and password.");
+          const login = await askRtspLogin();
+          if (!login) throw new Error("Enter a username and password to connect to the RTSP server.");
+          link = rtspWithLogin(link, login.username, login.password);
+          addLog("Connecting to the RTSP server with the signed-in account");
+        }
         const prepared = await prepareStream("rtsp", link, "");
         detectedLabel.textContent = "RTSP";
         playUrl.textContent = prepared.whep;
@@ -649,7 +749,9 @@
     document.querySelector("#btn-forward").addEventListener("click", () => setMode("forward"));
     document.querySelector("#btn-rtmp").addEventListener("click", () => setForward("rtmp"));
     document.querySelector("#btn-rtsp").addEventListener("click", () => setForward("rtsp"));
-    document.querySelector("#btn-gb").addEventListener("click", () => setForward("gb28181"));
+    document.querySelector("#btn-gb").addEventListener("click", () => {
+      window.location.href = "gb28181.html";
+    });
 
     document.querySelector("#play").addEventListener("click", async () => {
       playbackNote.textContent = "";

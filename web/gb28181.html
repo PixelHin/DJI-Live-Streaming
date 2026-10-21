@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GB28181 player</title>
+  <style>
+    :root { color-scheme: dark; --line: #f5c400; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.45 "Segoe UI", sans-serif;
+      background: #000;
+      color: #fff;
+    }
+    main { max-width: 960px; margin: 0 auto; padding: 24px 16px 40px; }
+    .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 8px; }
+    h1 { font-size: 22px; margin: 0; }
+    a.back {
+      border: 1px solid var(--line);
+      background: #000;
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 14px;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    p { margin: 0 0 16px; }
+    label { display: block; margin: 12px 0 6px; }
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #000;
+      color: #fff;
+    }
+    .row { display: grid; gap: 12px; }
+    @media (min-width: 720px) {
+      .row.two { grid-template-columns: 1fr 1fr; }
+    }
+    .actions { display: flex; gap: 8px; margin: 16px 0; }
+    button {
+      border: 1px solid var(--line);
+      background: #000;
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 14px;
+      cursor: pointer;
+    }
+    button.primary { background: var(--line); color: #000; }
+    .stage {
+      position: relative;
+      background: #000;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      overflow: hidden;
+      aspect-ratio: 16 / 9;
+    }
+    video { width: 100%; height: 100%; background: #000; }
+    .notice {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      text-align: center;
+      background: rgba(0, 0, 0, 0.72);
+    }
+    .notice[hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="top">
+      <h1>GB28181 player</h1>
+      <a class="back" href="index.html">Back</a>
+    </div>
+    <p>Enter the SIP server values from FlightHub 2. This page asks wvp to invite that device and plays the video here. Use the same SIP server IP, port, domain, server ID, and password in FlightHub 2.</p>
+    <div class="row two">
+      <div>
+        <label for="sip-ip">SIP server IP</label>
+        <input id="sip-ip" placeholder="Address FlightHub uses to reach this PC" autocomplete="off">
+      </div>
+      <div>
+        <label for="sip-port">SIP server port</label>
+        <input id="sip-port" placeholder="8116" autocomplete="off">
+      </div>
+      <div>
+        <label for="sip-domain">SIP server domain (SIP服务器域)</label>
+        <input id="sip-domain" placeholder="4401020049" autocomplete="off">
+      </div>
+      <div>
+        <label for="sip-id">SIP server ID</label>
+        <input id="sip-id" placeholder="20-digit server number" autocomplete="off">
+      </div>
+      <div>
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="off">
+      </div>
+      <div>
+        <label for="device-id">Device number</label>
+        <input id="device-id" placeholder="20-digit device number from FlightHub" autocomplete="off">
+      </div>
+    </div>
+    <label for="channel-id">Channel number</label>
+    <input id="channel-id" placeholder="Leave empty to use the device's first channel" autocomplete="off">
+    <div class="actions">
+      <button type="button" class="primary" id="play">Play</button>
+      <button type="button" id="stop">Stop</button>
+    </div>
+    <div class="stage">
+      <video id="video" autoplay playsinline controls></video>
+      <div class="notice" id="notice">Enter the SIP server values and press Play.</div>
+    </div>
+  </main>
+  <script>
+    const video = document.querySelector("#video");
+    const notice = document.querySelector("#notice");
+    let pc = null;
+
+    function showNotice(text) {
+      notice.hidden = !text;
+      notice.textContent = text || "";
+    }
+
+    function field(id) {
+      return document.querySelector(id).value.trim();
+    }
+
+    async function stopPlayback() {
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+      video.srcObject = null;
+    }
+
+    async function invite() {
+      const response = await fetch("/api/wvp/play", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sip_ip: field("#sip-ip"),
+          sip_port: field("#sip-port"),
+          sip_domain: field("#sip-domain"),
+          sip_id: field("#sip-id"),
+          password: field("#password"),
+          device_id: field("#device-id"),
+          channel_id: field("#channel-id")
+        })
+      });
+      const text = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch (error) {
+        throw new Error("Open this page from python server.py so it can reach wvp.");
+      }
+      if (!response.ok || payload.code) {
+        throw new Error(payload.message || "wvp did not start the stream.");
+      }
+      return payload.rtc;
+    }
+
+    async function playRtc(url) {
+      const next = new RTCPeerConnection();
+      pc = next;
+      next.addTransceiver("video", { direction: "recvonly" });
+      next.addTransceiver("audio", { direction: "recvonly" });
+      next.ontrack = (event) => {
+        const stream = event.streams[0];
+        if (video.srcObject !== stream) video.srcObject = stream;
+        showNotice("");
+      };
+      const offer = await next.createOffer();
+      await next.setLocalDescription(offer);
+      await new Promise((resolve) => {
+        if (next.iceGatheringState === "complete") {
+          resolve();
+          return;
+        }
+        next.addEventListener("icegatheringstatechange", () => {
+          if (next.iceGatheringState === "complete") resolve();
+        });
+        setTimeout(resolve, 1500);
+      });
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/sdp" },
+        body: next.localDescription.sdp
+      });
+      const answerText = await response.text();
+      if (!response.ok) {
+        throw new Error("Playback failed (" + response.status + "). wvp invited the device, but the video did not arrive.");
+      }
+      let answer = answerText;
+      const trimmed = answerText.trim();
+      if (trimmed.startsWith("{")) {
+        const payload = JSON.parse(trimmed);
+        if (payload.code) {
+          throw new Error(payload.msg || "The media server rejected the video.");
+        }
+        answer = payload.sdp || "";
+      }
+      if (!answer) {
+        throw new Error("The media server did not return a video answer.");
+      }
+      if (pc !== next) return;
+      await next.setRemoteDescription({ type: "answer", sdp: answer });
+    }
+
+    document.querySelector("#play").addEventListener("click", async () => {
+      if (!field("#sip-ip") || !field("#sip-port") || !field("#sip-domain") || !field("#sip-id") || !field("#password") || !field("#device-id")) {
+        showNotice("Enter the SIP server IP, port, domain, server ID, password, and device number.");
+        return;
+      }
+      try {
+        await stopPlayback();
+        showNotice("Asking wvp to invite the device…");
+        const rtc = await invite();
+        await playRtc(rtc);
+      } catch (error) {
+        await stopPlayback();
+        const message = error.message === "Failed to fetch"
+          ? "Could not reach the page server. Run start_server.bat and open this page from it."
+          : (error.message || "Could not play the stream.");
+        showNotice(message);
+      }
+    });
+
+    document.querySelector("#stop").addEventListener("click", async () => {
+      await stopPlayback();
+      showNotice("Stopped.");
+    });
+  </script>
+</body>
+</html>
